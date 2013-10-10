@@ -73,10 +73,10 @@ Setup:
     cd neighborhood-buzz
     
     # Setup a virtual environment
-    mkvirtualenv buzz
+    mkvirtualenv neighborhood-buzz
     
     # Activate the virtual environment
-    workon buzz
+    workon neighborhood-buzz
     
     # Install requirements
     pip install -r requirements.txt
