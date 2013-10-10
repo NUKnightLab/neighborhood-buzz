@@ -1,0 +1,470 @@
+{% extends "base.html" %}
+{% block extrahead %}
+<script type="text/javascript" src="{{ STATIC_URL }}js/jquery.history.js"></script>
+<script type="text/javascript" src="https://maps.googleapis.com/maps/api/js?sensor=false"></script>
+<script type="text/javascript" src="{{ STATIC_URL }}js/GeoJSON.js"></script>
+{% endblock %}
+
+{% block content %}
+    <div class="buzz-container">
+        <div class="span12 alert" id="mobile-alert">
+            <p><strong>NOTE:</strong> This project is designed for the desktop. You are currently not seeing all Buzz functionality.</p>
+        </div> 
+
+        <div class="row-fluid">
+        <div id="col-left" class="span7">
+            <div id="map"></div>
+        </div>
+
+        <div id="col-right" class="span4">
+            <div id="categories">
+                <ul id="instructions">
+                    <li>Click on a neighborhood on the map to see what people are tweeting about in that  
+                neighborhood.</li> 
+                    <li>Select a topic to view a heatmap comparing how much each neighborhood is 
+                tweeting about that topic.</li> 
+                    <li>Click on the <img src="{{ STATIC_URL }}img/next.png" width="18" style="vertical-align: text-top" alt="View Tweets"> arrow icon to see selected tweets for that topic in the city or 
+                selected neighborhood.</li>
+                </ul>
+                <ul id="instructions-small">
+                    <li>You are viewing Citywide data.</li> 
+                    <li>Select a topic to view how many tweets are found tweeting about that topic.</li> 
+                    <li>Click on the <img src="{{ STATIC_URL }}img/next.png" width="18" style="vertical-align: text-top" alt="View Tweets"> arrow icon to see selected tweets for that topic in the city.</li>
+                </ul>
+                <div class='breadcrumbs'>
+                    <h4 id='city_name'></h4>
+                    <h5 id='community_name'></h5>
+                    <h6 id='topic_name'></h6>
+                </div>
+                
+                <ul id='category_list'>
+    {% for c in categories %}
+                    <li id='category_{{ c.id }}'>
+                    <a href="javascript:void(0);" onclick="handle_click_category(this, '{{ c.slug }}');">
+                    <div class='square'> </div>{{ c.name }} &mdash; <span class='tweet-count'></span> 
+                    </a>
+                    <a href="javascript:void(0);" onclick="push_state({category: '{{ c.slug }}', tweets: 1});" class="tweetlink" style="display: none;">
+                    <img src="{{ STATIC_URL }}img/next.png" width="18" alt="View Tweets">
+                    </a>
+                    </li>
+    {% endfor %}
+                </ul>
+                
+                <p class='blurb'>Note: This data is updated daily and counts geotagged tweets captured over the past 7 days.</p>
+                
+                <div id='tweet_frame_container' style="display: none;">
+                    <iframe scrolling="no" id="tweet_frame" src=""></iframe>
+                </div>
+
+            </div>        
+        </div>    
+    </div>
+    </div>
+{% endblock %}
+
+{% block extrascripts %}
+<script type='application/javascript'>
+
+var _MapType = new google.maps.StyledMapType(
+    [
+        {featureType: "all", elementType: "all", stylers: [{saturation: -60}, {lightness: 10}, {gamma: 0.75}]}, 
+        {featureType: "water", elementType: "geometry", stylers: [{lightness: 80}, {gamma:0.3}]},
+        {featureType: "road.arterial", elementType: "geometry", stylers: [{saturation: -95}, {lightness: 200}, {gamma: 0.8}, {visibility: "simplified"}]},
+        {featureType: "road.arterial", elementType: "labels", stylers: [{visibility: "off"}]},
+        {featureType: "road.highway", elementType: "labels", stylers: [{visibility: "off"}]},
+        {featureType: "road.highway", elementType: "geometry", stylers: [{saturation: -91}, {lightness: 200}, {gamma: 0.8}, {visibility: "simplified"}]},
+        {featureType: "road.local", elementType: "geometry", stylers: [{saturation: -73}, {lightness: 100}, {gamma: 0.8}, {visibility: "simplified" }]},
+        {featureType: "road.local", elementType: "labels", stylers: [{visibility: "off"}]}
+    ],
+    {name: "Styled Map"}
+);
+
+var _GoogleMap = null;
+
+var _MapGeoJSON;    
+
+var _feature_styles = {
+    base: {
+        fillColor: '#bcbcbc',
+        fillOpacity: 0.4,
+        strokeColor: '#000',
+        strokeWeight: 0.2
+    },
+    // these styles should be specified as overrides to the base style
+    selected: {
+        strokeWeight: 1.2
+    },
+    heat: {
+        fillColor: '#ce4d28',
+        fillOpacity: 0          // set dynamically
+    }
+};
+
+var _category_map = {{ category_map|safe }};    // id => object
+var _city = {{ city|safe }};
+
+var _category_summary = [];
+var _category_id = 0;
+
+var _geojson_data = {};
+var _community_index = -1;
+
+// Current state
+var _state = {
+    city: _city.slug,
+    community: '{{ community_slug }}',
+    category: '{{ request.GET.category }}',
+    tweets: '{{ request.GET.tweets }}'
+};
+
+//
+// Map utils
+//
+function getZoomByBounds(map, bounds) {
+    var GLOBE_WIDTH = 256; // a constant in Google's map projection
+    var GLOBE_HEIGHT = 256; 
+
+    var pixelWidth = $(map.getDiv()).width();
+    var pixelHeight = $(map.getDiv()).height();
+
+    var latAngle = bounds[3] - bounds[1];
+    if(latAngle < 0) {
+        latAngle += 360;
+    }
+    
+    var lngAngle = bounds[2] - bounds[0];   
+    var latZoomLevel = Math.floor(Math.log(pixelHeight * 360 / latAngle / GLOBE_HEIGHT) / Math.LN2);
+    var lngZoomLevel = Math.floor(Math.log(pixelWidth * 360 / lngAngle / GLOBE_WIDTH) / Math.LN2);
+   
+    return Math.min(latZoomLevel, lngZoomLevel);;
+}
+
+function center_zoom(lng_lat, bounds) {
+    var center = new google.maps.LatLng(lng_lat[1], lng_lat[0]);
+    _GoogleMap.setCenter(center); 
+   
+    var listener = google.maps.event.addListener(_GoogleMap, 'idle', function() {
+        _GoogleMap.setZoom(getZoomByBounds(_GoogleMap, bounds));
+        google.maps.event.removeListener(listener);  
+    });
+}
+
+function setup_map(city) {
+    var center = new google.maps.LatLng(city.center[1], city.center[0]);
+
+    
+    if(!_GoogleMap) {   
+       _GoogleMap = new google.maps.Map(document.getElementById('map'), {
+            center: center,
+            zoom: 11,
+            mapTypeId: google.maps.MapTypeId.ROADMAP,
+            mapTypeControl: false,
+            streetViewControl: false
+        });
+        
+        _GoogleMap.mapTypes.set('map_style', _MapType);
+        _GoogleMap.setMapTypeId('map_style');
+    } else {
+        _GoogleMap.setCenter(center);    
+    }
+    
+    // Set zoom level
+    var listener = google.maps.event.addListener(_GoogleMap, 'idle', function() {
+        _GoogleMap.setZoom(getZoomByBounds(_GoogleMap, city.bounds));
+        google.maps.event.removeListener(listener);  
+    });
+}
+
+//
+// Set and un-set map feature styles
+//
+function set_feature_style(feature, style) {
+    for(var i = 0; i < feature.shapes.length; i++) {
+        $.extend(feature.shapes[i], style);
+        feature.shapes[i].update();
+    }
+}
+
+function remove_feature_style(feature, style) {
+    var reset_style = {};
+    for(var property in style) {
+        reset_style[property] = _feature_styles.base[property];
+    }
+    set_feature_style(feature, reset_style);  
+}
+
+//
+// Categories
+//
+function summary_n(category_id, community_id) {
+    if(category_id in _category_summary) {
+        if(community_id in _category_summary[category_id]) {
+            return _category_summary[category_id][community_id].n;
+        }
+    }
+    return 0;
+}
+
+function summary_pct(category_id, community_id) {
+    if(category_id in _category_summary) {
+        if(community_id in _category_summary[category_id]) {
+            return _category_summary[category_id][community_id].pct;
+        }
+    }
+    return 0;
+}
+
+function set_category_data(properties) {
+    $('.square').css('opacity', 0);
+    
+    for(var category_id in _category_summary) {
+        var n = summary_n(category_id, properties.id);
+        
+        // Currently selected category always has 100% opacity!
+        if(_state.category && (category_id == _category_map[_state.category].id)) {
+            $('#category_'+category_id+' .square')
+                .css('opacity', 1);
+        } else {
+            $('#category_'+category_id+' .square')
+                .css('opacity', summary_pct(category_id, properties.id));
+        }
+        $('#category_'+category_id+' .tweet-count')
+            .html(n+' tweets').show();     
+        
+        if(n > 0) {          
+            $('#category_'+category_id+' .tweetlink').show();           
+        } else {
+            $('#category_'+category_id+' .tweetlink').hide();            
+        }
+    }
+}
+
+// Handle a click on a category (ignore if already selected)
+function handle_click_category(el, category_slug) {
+    if(!$(el).parent('li').hasClass('selected')) {
+        push_state({category: category_slug});
+    }
+}
+
+function select_category(category_slug) {    
+    if(category_slug) {
+        categoryObj = _category_map[category_slug];        
+        _category_id = categoryObj.id;    
+               
+        if(_state.tweets) {
+            $('#topic_name').html(
+                '<a href="javascript:void(0);" onclick="push_state({tweets: 0});">'
+                + categoryObj.name + '</a>'
+            );
+        } else {
+            $('#topic_name').html(categoryObj.name);
+        }
+        
+        $('#category_'+_category_id)
+            .removeClass('deselected').addClass('selected');
+                        
+        $('#category_'+_category_id+' .square')
+            .css('opacity', 1);
+
+        $('#category_list li:not(#category_'+_category_id+')').addClass('deselected');
+
+        var heat = _feature_styles.heat;
+        for(var i = 0; i < _MapGeoJSON.shapes.length; i++) {
+            var feature = _MapGeoJSON.shapes[i];            
+            heat.fillOpacity = summary_pct(_category_id, feature.prop.id);
+            set_feature_style(feature, heat);
+        } 
+    } else {
+        _category_id = 0;    
+            
+        $('#topic_name').html('');
+
+        $('#category_list .selected').removeClass('selected');    
+        $('#category_list .deselected').removeClass('deselected');
+        
+        for(var i = 0; i < _MapGeoJSON.shapes.length; i++) {
+            remove_feature_style(_MapGeoJSON.shapes[i], _feature_styles.heat);
+        }
+    }
+ }
+
+function show_tweets(category_slug) {
+    // Position iframe container (tried to do this in load, but didn't work)
+    $('#tweet_frame_container').css('top', $('#category_list').position().top+'px');
+    
+    var url = '/tweets/'+_city.slug+'/'
+        + ((_community_index > -1 ) ? _geojson_data.features[_community_index].properties.slug+'/' : '')
+        + 'embed/?category='+category_slug;
+        
+    //$('#tweet_frame').attr('src', url);
+    document.getElementById("tweet_frame").contentWindow.location.replace(url);
+    $('#tweet_frame_container').show();  
+}
+
+function hide_tweets() {
+    $('#tweet_frame_container').hide();
+    //$('#tweet_frame').attr('src', '');
+    document.getElementById("tweet_frame").contentWindow.location.replace('about:blank');
+}
+
+function show_community(index) {
+    hide_tweets();
+    
+    if(_community_index > -1) {
+        remove_feature_style(_MapGeoJSON.shapes[_community_index], _feature_styles.selected);
+    }
+    _community_index = index;
+    set_feature_style(_MapGeoJSON.shapes[index], _feature_styles.selected);
+    
+    $('#city_name').html(
+        '<a href="javascript:void(0);" onclick="push_state({community: 0, category: 0, tweets: 0});">'
+        + _city.name +'</a>');   
+
+    props = _geojson_data.features[index].properties;   
+    
+    if(_state.category || _state.tweets) {
+       $('#community_name').html(
+            '<a href="javascript:void(0);" onclick="push_state({category: 0, tweets: 0});">'
+            + props.name + '</a>'
+        );   
+    } else { 
+        $('#community_name').html(props.name);
+    }
+    
+    set_category_data(props);
+     //center_zoom(properties.center, properties.bounds);
+ }
+
+function show_city() {
+    hide_tweets();
+
+    if(_community_index > -1) {
+        remove_feature_style(_MapGeoJSON.shapes[_community_index], _feature_styles.selected);
+    }
+    _community_index = -1;
+
+    if(_state.community || _state.category || _state.tweets) {
+        $('#city_name').html(
+            '<a href="javascript:void(0);" onclick="push_state({community: 0, category: 0, tweets: 0});">'
+            + _city.name +'</a>');   
+    } else {
+        $('#city_name').html(_city.name);
+    }
+
+    props = {'id': 0, 'name': ''};     
+    $('#community_name').html(props.name);
+    set_category_data(props);
+    
+    // center_zoom(_city.center, _city.bounds);
+}
+
+function load_city_data(city_slug, on_complete) {           
+    $.getJSON('/tweets/'+city_slug+'/summary.json', function(data) {
+        if(data.error) {
+            alert(data.error);
+            return;
+        }
+        _category_summary = data.summary;
+                            
+        $.getJSON('/tweets/'+city_slug+'/features.json', function(data) { 
+            if(data.error) {
+                alert(data.error);
+                return;
+            }           
+            _geojson_data = data;
+            
+            _MapGeoJSON = GeoJSON({
+                googleMap: _GoogleMap,
+                JSONSrc: data,
+                polygonOptionsCallback: function(props) {
+                    return _feature_styles.base;
+                },
+                polygonEventsCallback: function(polygonpiece, index, styles, props) {                    
+                    google.maps.event.addListener(polygonpiece, 'click', function() {  
+                        if(_community_index == index) {
+                            push_state({community: 0});
+                        } else {
+                            push_state({community: props.slug});
+                        }
+                    });
+                }
+            });
+                        
+            if(on_complete) {
+                on_complete();
+            }         
+        });
+    });
+}
+
+//
+// Push state, triggering a statechange event (see below)
+// 
+function push_state(kwargs) {   
+    if('community' in kwargs) {
+        _state.community = kwargs.community;
+    }
+    if('category' in kwargs) {
+        _state.category = kwargs.category;
+    }    
+    if('tweets' in kwargs) {
+        _state.tweets = kwargs.tweets;
+    }
+    
+    var params = [];
+    if(_state.category) {
+        params.push('category='+_state.category);
+    }
+    if(_state.tweets) {
+        params.push('tweets=y');
+    }
+      
+    var url = '/tweets/'+_state.city+'/'
+        + ((_state.community) ? _state.community+'/' : '')
+        + ((params.length) ? '?'+params.join('&') : '');
+
+    History.pushState(_state, document.title, url); 
+}
+
+
+$(document).ready(function() {   
+ 
+    setup_map(_city);   
+
+    load_city_data(_city.slug, function() {   
+        //
+        // Set initial state
+        //
+        History.replaceState(_state, document.title, document.location.href);
+ 
+        //
+        // All UI changes are funnelled through this event handler
+        //
+        History.Adapter.bind(window, 'statechange', function() {
+            _state = $.extend({}, History.getState().data);
+         
+            if(_state.community) {
+                show_community(_geojson_data.slug_map[_state.community]);
+            } else {
+                show_city();
+            }  
+        
+            select_category(_state.category);    
+            
+            if(_state.tweets) {
+                show_tweets(_state.category);
+            } else {
+                hide_tweets();
+            }           
+        });
+       
+        //
+        // Trigger a state change
+        //
+        History.Adapter.trigger(window,'statechange');
+    });
+});
+
+
+</script>
+{% endblock %}

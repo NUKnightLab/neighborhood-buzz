@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<head>
+<meta charset="utf-8">
+<!-- Note: You must include the Blueline CDN stylesheet -->
+<link href="http://cdn.knightlab.com/libs/blueline/latest/css/blueline.min.css" rel="stylesheet">
+<link rel="stylesheet" href="{{ STATIC_URL }}css/style.css" />
+<script type="application/javascript" src="//ajax.googleapis.com/ajax/libs/jquery/1.9.0/jquery.min.js"></script>
+<script type="application/javascript" src="//platform.twitter.com/widgets.js" charset="utf-8"></script>
+<title>Tweets</title>
+</head>
+<body class="tweet-embed">
+
+{% if error %}
+
+<p>{{ error }}</p>
+
+{% else %}
+
+<div class='tweet-window'>
+     <div class='tweet-header'>
+    <span class='tweet-feedback-text'>Is this tweet categorized correctly?</span>
+
+    <div class='tweet-feedback-vote'>
+        <a href="javascript:void(0);" onclick="send_feedback(true);">Y</a>
+    </div>
+
+    <div class='tweet-feedback-vote'>
+        <a href="javascript:void(0);" onclick="send_feedback(false);">N</a>
+    </div>
+    
+    <div class="tweet-nav nav-next">
+        <a class='tweet-next' href="javascript:void(0);" onclick="scroll(1);"> next tweet &gt;</a>
+    </div>
+    <div class="tweet-nav nav-prev">
+        <a class='tweet-prev' href="javascript:void(0);" onclick="scroll(-1);" style="display: none;">&lt; prev tweet</a>
+    </div>
+    
+    <div class='clearfix'></div>
+    
+</div>
+    <div class='tweet-container'>   
+{% for tweet in tweets %}
+        <div class='tweet-div' id="tweet_{{ forloop.counter0 }}">
+        <blockquote class="twitter-tweet" data-conversation="none" data-cards="hidden">
+        <p>{{ tweet.text|safe }}</p>&mdash; {{ tweet.user_name }} (@{{ tweets.user_screen_name }})
+        <a href="https://twitter.com/twitterapi/status/{{ tweet.id_str }}">{{ tweet.created_at|date:"F d, Y" }}</a>
+        </blockquote>
+        </div>
+
+{% endfor %}
+    </div>   
+
+</div>
+
+
+{% endif %}
+
+<script type="application/javascript">
+
+var _current = 0;
+var _count = {{ tweets|length }};
+
+var _feedback_text = "Is this tweet categorized correctly?";
+var _feedback_sent = "Thank you for your feedback!";
+
+var _feedback_urls = [
+{% for tweet in tweets %}
+    '{% url tweets.views.feedback_miscategorized tweet_id=tweet.id %}'{% if not forloop.last %},{% endif %}
+{% endfor %}
+];
+
+function set_feedback_controls() {
+    if( _feedback_urls[_current]) {
+        $('.tweet-feedback-text').html(_feedback_text);
+        $('.tweet-feedback-vote').show();
+    } else {
+        $('.tweet-feedback-text').html(_feedback_sent);
+        $('.tweet-feedback-vote').hide();
+    }
+}
+
+function send_feedback(yes) {     
+    var url = _feedback_urls[_current];
+    _feedback_urls[_current] = null;
+
+    set_feedback_controls();
+        
+    if(yes) {
+        $.getJSON(url, function(data) { });
+    }
+}
+
+function scroll(offset) {
+    _current += offset;    
+    
+    $('.tweet-container').css('left', -($("#tweet_"+_current).position().left));
+    
+    set_feedback_controls();
+       
+    if(_current) {
+        $('.tweet-prev').show();
+    } else {
+        $('.tweet-prev').hide();
+    }
+    if(_current+1 < _count) {
+        $('.tweet-next').show();
+    } else {
+        $('.tweet-next').hide();
+    }
+}
+
+$(function() {
+    $('.tweet-feedback-text').html(_feedback_text);
+});
+
+
+
+</script>
+</body>
+</html>
+

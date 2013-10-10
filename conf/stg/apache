@@ -1,0 +1,14 @@
+<VirtualHost *:80>
+    ServerName buzz.knilab.com
+    ServerAlias buzz.knilab.com
+    ServerAdmin admin@knilab.com
+    ErrorLog /var/log/apache2/buzz.log
+
+    LogLevel info
+
+    SetEnvIf X-Forwarded-Protocol "^https$" HTTPS=on
+
+    WSGIDaemonProcess buzz display-name=%{GROUP} maximum-requests=10000
+    WSGIProcessGroup buzz
+    WSGIScriptAlias / /home/apps/sites/buzz/conf/stg/wsgi.py
+</VirtualHost>

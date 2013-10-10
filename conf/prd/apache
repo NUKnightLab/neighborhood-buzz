@@ -1,0 +1,19 @@
+<VirtualHost *:80>
+    ServerName neighborhoodbuzz.knightlab.com
+    ServerAlias buzz.knightlab.com
+    ServerAdmin admin@knightlab.com
+    ErrorLog /var/log/apache2/buzz.log
+
+    LogLevel info
+
+    SetEnvIf X-Forwarded-Protocol "^https$" HTTPS=on
+
+    WSGIDaemonProcess buzz display-name=%{GROUP} maximum-requests=10000
+    WSGIProcessGroup buzz
+    WSGIScriptAlias / /home/apps/sites/buzz/conf/prd/wsgi.py
+    
+    RewriteEngine on
+    RewriteCond %{HTTP_HOST} !^neighborhoodbuzz.knightlab.com [NC] 
+    RewriteRule ^/(.*)  http://neighborhoodbuzz.knightlab.com/$1 [L,R=301]
+
+</VirtualHost>
