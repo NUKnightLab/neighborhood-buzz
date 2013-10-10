@@ -67,10 +67,10 @@ Setup:
     # Checkout repositories
     git clone git@github.com:NUKnightLab/secrets.git
     git clone git@github.com:NUKnightLab/fablib.git
-    git clone git@github.com:NUKnightLab/buzz.git
+    git clone git@github.com:NUKnightLab/neighborhood-buzz.git
 
     # Change into buzz directory
-    cd buzz
+    cd neighborhood-buzz
     
     # Setup a virtual environment
     mkvirtualenv buzz
